@@ -21,7 +21,6 @@ jobs:
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
-          echo $FEISHU_WEBHOOK
           curl -s -X POST "$FEISHU_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "{
