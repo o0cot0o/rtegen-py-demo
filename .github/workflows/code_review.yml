@@ -1,0 +1,31 @@
+name: On Push Notify
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 获取变更信息
+        run: |
+          echo "REPO=${{ github.repository }}" >> $GITHUB_ENV
+          echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "AUTHOR=$(git log -1 --pretty=%an)" >> $GITHUB_ENV
+          echo "MSG=$(git log -1 --pretty=%s)" >> $GITHUB_ENV
+          echo "FILES=$(git diff --name-only HEAD~1..HEAD | head -20 | tr '\n' ', ')" >> $GITHUB_ENV          
+
+      - name: 通知飞书
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"msg_type\": \"text\",
+              \"content\": {
+                \"text\": \"📦 代码已推送\n仓库: ${{ env.REPO }}\n分支: ${{ env.BRANCH }}\n作者: ${{ env.AUTHOR }}\n提交: ${{ env.MSG }}\n变更: ${{ env.FILES }}\"
+              }
+            }" 
