@@ -165,7 +165,6 @@ class CodeGenerator:
             f"#define {guard}",
             "",
             '#include "Rte_Type.h"',
-            '#include "Rte_Application.h"',
             "",
         ]
 
