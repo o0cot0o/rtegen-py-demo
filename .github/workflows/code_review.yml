@@ -26,6 +26,6 @@ jobs:
             -d "{
               \"msg_type\": \"text\",
               \"content\": {
-                \"text\": \"📦 代码已推送\n仓库: ${{ env.REPO }}\n分支: ${{ env.BRANCH }}\n作者: ${{ env.AUTHOR }}\n提交: ${{ env.MSG }}\n变更: ${{ env.FILES }}\"
+                \"text\": \"<at user_id=\\\"oc_f381f76891212129f832cde021e452b7\\\">柯小康的虾米</at>📦 代码已推送\n仓库: ${{ env.REPO }}\n分支: ${{ env.BRANCH }}\n作者: ${{ env.AUTHOR }}\n提交: ${{ env.MSG }}\n变更: ${{ env.FILES }}\"
               }
             }" 
