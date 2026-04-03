@@ -141,7 +141,7 @@ class CodeGenerator:
             lines.append(f"/* === {comp.name} === */")
             for port in comp.ports:
                 if port.port_kind == "P-PORT" and port.data_type:
-                    lines.append(f"#define Rte_Write_{comp.name}_{port.name}_{port.data_element}(data) \\")
+                    lines.append(f"#define Rte_WriteAAA_{comp.name}_{port.name}_{port.data_element}(data) \\")
                     lines.append(f"    Rte_Write_{comp.name}_{port.name}_{port.data_element}_Impl(data)")
                     lines.append("")
                 elif port.port_kind == "R-PORT" and port.data_type:
