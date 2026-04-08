@@ -35,16 +35,26 @@ jobs:
 
           BOT_OPEN_ID="ou_c175377cf6031aad8d2bcf579c9c8d8b"
 
-          TEXT="<at user_id=\"${BOT_OPEN_ID}\">柯小康的虾米</at> 📦 代码已推送
-              仓库: ${REPO}
-              分支: ${BRANCH}
-              作者: ${AUTHOR}
-              提交: ${MSG}
-              变更: ${STAT}"
-
-          CONTENT=$(python3 -c "import json,sys; print(json.dumps({'text': sys.stdin.read()}))" <<< "$TEXT")
-
+          # 使用 python 一次性构建完整的请求体，避免 bash 字符串拼接问题
           curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            -d "{\"receive_id\":\"$FEISHU_CHAT_ID\",\"msg_type\":\"text\",\"content\":\"$CONTENT\"}"
+            -d "$(python3 -c "
+          import json
+          import sys
+
+          text = '''<at user_id=\"${BOT_OPEN_ID}\">柯小康的虾米</at> 📦 代码已推送
+          仓库: ${REPO}
+          分支: ${BRANCH}
+          作者: ${AUTHOR}
+          提交: ${MSG}
+          变更: ${STAT}'''
+
+          data = {
+              'receive_id': '${FEISHU_CHAT_ID}',
+              'msg_type': 'text',
+              'content': json.dumps({'text': text}, ensure_ascii=False)
+          }
+
+          print(json.dumps(data, ensure_ascii=False))
+          ")"
