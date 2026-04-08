@@ -19,9 +19,7 @@ jobs:
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
           echo "AUTHOR=$(git log -1 --pretty=%an)" >> $GITHUB_ENV
           echo "MSG=$(git log -1 --pretty=%s)" >> $GITHUB_ENV
-          echo "COMMIT=$(git log -1 --pretty=%h)" >> $GITHUB_ENV
-          echo "STAT=$(git diff --stat HEAD~1..HEAD | tail -1)" >> $GITHUB_ENV
-          echo "FILES=$(git diff --name-only HEAD~1..HEAD | head -20 | tr '\n' ', ')" >> $GITHUB_ENV          
+          echo "STAT=$(git diff --stat HEAD~1..HEAD | tail -1)" >> $GITHUB_ENV          
 
       - name: 生成 diff
         run: |
@@ -30,27 +28,24 @@ jobs:
             git diff origin/${{ github.base_ref }}...HEAD > /tmp/review.diff
           else
             git diff HEAD~1..HEAD > /tmp/review.diff
-          fi
-          echo "DIFF_SIZE=$(wc -c < /tmp/review.diff)" >> $GITHUB_ENV          
+          fi          
 
-      - name: 通知飞书 (应用 API)
+      - name: 通知飞书
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
         run: |
-          # 1. 获取 tenant_access_token
           TOKEN=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
             -H 'Content-Type: application/json' \
             -d "{\"app_id\":\"$FEISHU_APP_ID\",\"app_secret\":\"$FEISHU_APP_SECRET\"}" \
             | jq -r '.tenant_access_token')
 
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "❌ 获取 token 失败"
+            echo "获取 token 失败"
             exit 1
           fi
 
-          # 2. 构造消息内容（带 @吴智敏 触发机器人）
           TEXT="@吴智敏 📦 代码已推送          
 仓库: ${{ env.REPO }}
 分支: ${{ env.BRANCH }}
@@ -58,21 +53,9 @@ jobs:
 提交: ${{ env.MSG }}
 变更: ${{ env.STAT }}"
 
-          # 3. 用应用身份发消息到群
-          RESULT=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
+          ESCAPED=$(echo "$TEXT" | jq -Rs .)
+
+          curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            -d "$(jq -n \
-              --arg chat_id "$FEISHU_CHAT_ID" \
-              --arg text "$TEXT" \
-              '{receive_id: $chat_id, msg_type: "text", content: {text: $text}}')")
-
-          echo "发送结果: $RESULT"
-
-          CODE=$(echo "$RESULT" | jq -r '.code // .StatusCode // 0')
-          if [ "$CODE" != "0" ]; then
-            echo "⚠️ 发送失败，code=$CODE"
-            exit 1
-          fi
-
-          echo "✅ 飞书通知发送成功"
+            -d "{\"receive_id\":\"$FEISHU_CHAT_ID\",\"msg_type\":\"text\",\"content\":{\"text\":$ESCAPED}}"
