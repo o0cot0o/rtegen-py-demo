@@ -1,4 +1,4 @@
-name: Code Review Trigger
+name: On Push Notify
 on:
   push:
     branches: [main, master]
@@ -8,53 +8,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: 获取变更信息
+        run: |
+          echo "REPO=${{ github.repository }}" >> $GITHUB_ENV
+          echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "AUTHOR=$(git log -1 --pretty=%an)" >> $GITHUB_ENV
+          echo "MSG=$(git log -1 --pretty=%s)" >> $GITHUB_ENV
+          echo "FILES=$(git diff --name-only HEAD~1..HEAD | head -20 | tr '\n' ', ')" >> $GITHUB_ENV          
 
       - name: 通知飞书
         env:
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          FEISHU_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
-          REPO="${{ github.repository }}"
-          BRANCH="${{ github.ref_name }}"
-          AUTHOR="$(git log -1 --pretty=%an)"
-          MSG="$(git log -1 --pretty=%s)"
-          STAT="$(git diff --stat HEAD~1..HEAD | tail -1)"
-
-          TOKEN=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
-            -H 'Content-Type: application/json' \
-            -d "{\"app_id\":\"$FEISHU_APP_ID\",\"app_secret\":\"$FEISHU_APP_SECRET\"}" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['tenant_access_token'])")
-
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "获取 token 失败"
-            exit 1
-          fi
-
-          BOT_OPEN_ID="ou_c175377cf6031aad8d2bcf579c9c8d8b"
-
-          # 使用 python 一次性构建完整的请求体，避免 bash 字符串拼接问题
-          curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d "$(python3 -c "
-          import json
-          import sys
-
-          text = '''<at user_id=\"${BOT_OPEN_ID}\">柯小康的虾米</at> 📦 代码已推送
-          仓库: ${REPO}
-          分支: ${BRANCH}
-          作者: ${AUTHOR}
-          提交: ${MSG}
-          变更: ${STAT}'''
-
-          data = {
-              'receive_id': '${FEISHU_CHAT_ID}',
-              'msg_type': 'text',
-              'content': json.dumps({'text': text}, ensure_ascii=False)
-          }
-
-          print(json.dumps(data, ensure_ascii=False))
-          ")"
+          curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"msg_type\": \"text\",
+              \"content\": {
+                \"text\": \"<at user_id=\\\"ou_649d56634da21d1a39cc86ccc3ecae0d\\\">吴智敏</at>📦 代码已推送\n仓库: ${{ env.REPO }}\n分支: ${{ env.BRANCH }}\n作者: ${{ env.AUTHOR }}\n提交: ${{ env.MSG }}\n变更: ${{ env.FILES }}\"
+              }
+            }" 
