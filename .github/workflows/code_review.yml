@@ -33,7 +33,7 @@ jobs:
             exit 1
           fi
 
-          CONTENT=$(jq -nc --arg t "@吴智敏 📦 代码已推送
+          CONTENT=$(jq -nc --arg t "📦 代码已推送
                     仓库: ${REPO}
                     分支: ${BRANCH}
                     作者: ${AUTHOR}
