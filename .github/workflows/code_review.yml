@@ -1,6 +1,8 @@
-name: On Push Notify
+name: Code Review Trigger
 on:
   push:
+    branches: [main, master]
+  pull_request:
     branches: [main, master]
 
 jobs:
@@ -8,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 获取变更信息
         run: |
@@ -15,17 +19,60 @@ jobs:
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
           echo "AUTHOR=$(git log -1 --pretty=%an)" >> $GITHUB_ENV
           echo "MSG=$(git log -1 --pretty=%s)" >> $GITHUB_ENV
+          echo "COMMIT=$(git log -1 --pretty=%h)" >> $GITHUB_ENV
+          echo "STAT=$(git diff --stat HEAD~1..HEAD | tail -1)" >> $GITHUB_ENV
           echo "FILES=$(git diff --name-only HEAD~1..HEAD | head -20 | tr '\n' ', ')" >> $GITHUB_ENV          
 
-      - name: 通知飞书
-        env:
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK_URL }}
+      - name: 生成 diff
         run: |
-          curl -s -X POST "$FEISHU_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"msg_type\": \"text\",
-              \"content\": {
-                \"text\": \"<at user_id=\\\"ou_649d56634da21d1a39cc86ccc3ecae0d\\\">吴智敏</at>📦 代码已推送\n仓库: ${{ env.REPO }}\n分支: ${{ env.BRANCH }}\n作者: ${{ env.AUTHOR }}\n提交: ${{ env.MSG }}\n变更: ${{ env.FILES }}\"
-              }
-            }" 
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            git diff origin/${{ github.base_ref }}...HEAD > /tmp/review.diff
+          else
+            git diff HEAD~1..HEAD > /tmp/review.diff
+          fi
+          echo "DIFF_SIZE=$(wc -c < /tmp/review.diff)" >> $GITHUB_ENV          
+
+      - name: 通知飞书 (应用 API)
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
+        run: |
+          # 1. 获取 tenant_access_token
+          TOKEN=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
+            -H 'Content-Type: application/json' \
+            -d "{\"app_id\":\"$FEISHU_APP_ID\",\"app_secret\":\"$FEISHU_APP_SECRET\"}" \
+            | jq -r '.tenant_access_token')
+
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "❌ 获取 token 失败"
+            exit 1
+          fi
+
+          # 2. 构造消息内容（带 @吴智敏 触发机器人）
+          TEXT="@吴智敏 📦 代码已推送          
+仓库: ${{ env.REPO }}
+分支: ${{ env.BRANCH }}
+作者: ${{ env.AUTHOR }}
+提交: ${{ env.MSG }}
+变更: ${{ env.STAT }}"
+
+          # 3. 用应用身份发消息到群
+          RESULT=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n \
+              --arg chat_id "$FEISHU_CHAT_ID" \
+              --arg text "$TEXT" \
+              '{receive_id: $chat_id, msg_type: "text", content: {text: $text}}')")
+
+          echo "发送结果: $RESULT"
+
+          CODE=$(echo "$RESULT" | jq -r '.code // .StatusCode // 0')
+          if [ "$CODE" != "0" ]; then
+            echo "⚠️ 发送失败，code=$CODE"
+            exit 1
+          fi
+
+          echo "✅ 飞书通知发送成功"
