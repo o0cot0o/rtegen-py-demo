@@ -56,18 +56,12 @@ class CodeGenerator:
     def __init__(self, module: RteModule, output_dir: str = "output"):
         self.module = module
         self.output_dir = output_dir
-        # 构建连接器映射: (provider_swc, provider_port) -> [Connector, ...]
-        self._connector_map: dict[tuple[str, str], list] = {}
-        for conn in module.connectors:
-            key = (conn.provider_swc, conn.provider_port)
-            self._connector_map.setdefault(key, []).append(conn)
 
     def generate(self):
         """生成所有 RTE 文件"""
         print(f"\nGenerating RTE files to: {self.output_dir}")
         self._gen_rte_h()
         self._gen_rte_type_h()
-        self._gen_rte_cbk_h()
         self._gen_rte_application_h()
         for comp in self.module.components:
             self._gen_rte_swc_h(comp)
@@ -89,7 +83,6 @@ class CodeGenerator:
             f"#define {guard}",
             "",
             "#include \"Rte_Type.h\"",
-            "#include \"Rte_Cbk.h\"",
             "",
         ]
         lines.extend(includes)
@@ -98,34 +91,6 @@ class CodeGenerator:
             f"#endif /* {guard} */",
         ])
         _write_file(self.output_dir, "Rte.h", "\n".join(lines) + "\n")
-
-    # ─── Rte_Cbk.h ──────────────────────────
-
-    def _gen_rte_cbk_h(self):
-        """生成回调声明头文件，包含连接器相关的回调"""
-        guard = _header_guard("Rte_Cbk.h")
-        lines = [
-            _c_comment("TOPPERS/A-RTEGEN Python Demo\n * Auto-generated RTE callback declarations"),
-            "",
-            f"#ifndef {guard}",
-            f"#define {guard}",
-            "",
-            '#include "Rte_Type.h"',
-            "",
-        ]
-
-        if self.module.connectors:
-            lines.append("/* Callbacks for inter-SWC data routing */")
-            for conn in self.module.connectors:
-                cbk_name = f"Rte_Cbk_{conn.requester_swc}_{conn.requester_port}"
-                lines.append(f"void {cbk_name}(void);")
-            lines.append("")
-        else:
-            lines.append("/* No connectors defined — no callbacks required */")
-            lines.append("")
-
-        lines.append(f"#endif /* {guard} */")
-        _write_file(self.output_dir, "Rte_Cbk.h", "\n".join(lines) + "\n")
 
     # ─── Rte_Type.h ───────────────────────────
 
@@ -138,48 +103,20 @@ class CodeGenerator:
             f"#define {guard}",
             "",
             "#include <stdint.h>",
-            "#include <stdbool.h>",
             "",
         ]
 
-        # AUTOSAR 标准类型
-        lines.append("/* AUTOSAR standard types */")
-        lines.extend([
-            "typedef unsigned char  uint8;",
-            "typedef unsigned short uint16;",
-            "typedef unsigned int   uint32;",
-            "typedef signed char    sint8;",
-            "typedef signed short   sint16;",
-            "typedef signed int     sint32;",
-            "typedef float          float32;",
-            "typedef double         float64;",
-            "typedef uint8          Std_ReturnType;",
-            "",
-        ])
-
-        # 标准宏定义
-        lines.append("/* AUTOSAR standard macros */")
-        lines.extend([
-            "#define E_OK      0x00U",
-            "#define E_NOT_OK  0x01U",
-            "#define NULL_PTR  ((void *)0)",
-            "",
-        ])
-
-        # 基础类型 typedef (ARXML 自定义，跳过与标准类型重名的)
-        standard_types = {"uint8", "uint16", "uint32", "sint8", "sint16", "sint32", "float32", "float64", "Std_ReturnType"}
-        custom_types = [bt for bt in self.module.base_types if bt.name not in standard_types]
-        if custom_types:
-            lines.append("/* Custom base types from ARXML */")
-            for bt in custom_types:
+        # 基础类型 typedef
+        if self.module.base_types:
+            lines.append("/* Base types */")
+            for bt in self.module.base_types:
                 lines.append(f"typedef {bt.native_declaration} {bt.name};")
             lines.append("")
 
-        # 数据类型 typedef (跳过自引用: typedef uint16 uint16;)
-        unique_data_types = [dt for dt in self.module.data_types if dt.name != dt.base_type]
-        if unique_data_types:
+        # 数据类型 typedef
+        if self.module.data_types:
             lines.append("/* Application data types */")
-            for dt in unique_data_types:
+            for dt in self.module.data_types:
                 lines.append(f"typedef {dt.base_type} {dt.name};")
             lines.append("")
 
@@ -228,37 +165,22 @@ class CodeGenerator:
             f"#define {guard}",
             "",
             '#include "Rte_Type.h"',
+            '#include "Rte_Application.h"',
             "",
         ]
 
-        # 函数声明 — Write (P-PORT)
-        lines.append("/* Write API (P-PORT) */")
+        # 函数声明
         for port in comp.ports:
             if port.port_kind == "P-PORT" and port.data_type:
                 func_name = f"Rte_Write_{comp.name}_{port.name}_{port.data_element}"
                 lines.append(f"Std_ReturnType {func_name}_Impl({port.data_type} data);")
-        lines.append("")
-
-        # 函数声明 — Read (R-PORT)
-        lines.append("/* Read API (R-PORT) */")
-        for port in comp.ports:
-            if port.port_kind == "R-PORT" and port.data_type:
+            elif port.port_kind == "R-PORT" and port.data_type:
                 func_name = f"Rte_Read_{comp.name}_{port.name}_{port.data_element}"
                 lines.append(f"Std_ReturnType {func_name}_Impl({port.data_type}* data);")
+
         lines.append("")
 
-        # 调度相关声明
-        has_timing = any(run.min_interval > 0 for run in comp.runnables)
-        if has_timing:
-            lines.append("/* Scheduler API */")
-            for run in comp.runnables:
-                if run.min_interval > 0:
-                    lines.append(f"Std_ReturnType Rte_IsRunnableReady_{run.name}(void);")
-            lines.append(f"void Rte_Task_{comp.name}(void);")
-            lines.append("")
-
         # Runnable 声明
-        lines.append("/* Runnable declarations */")
         for run in comp.runnables:
             lines.append(f"void {run.name}(void);")
 
@@ -280,33 +202,25 @@ class CodeGenerator:
             "",
         ]
 
-        # ─── 数据缓冲区 ───
+        # 模块级静态缓冲区
         lines.append("/* Data buffers */")
         for port in comp.ports:
             if port.data_type and port.data_element:
                 lines.append(f"static {port.data_type} {port.name}_buffer;")
         lines.append("")
 
-        # ─── Write 函数实现 (P-PORT) ───
+        # Write 函数实现
         for port in comp.ports:
             if port.port_kind == "P-PORT" and port.data_type:
                 func_name = f"Rte_Write_{comp.name}_{port.name}_{port.data_element}"
                 lines.append(f"Std_ReturnType {func_name}_Impl({port.data_type} data)")
                 lines.append("{")
                 lines.append(f"    {port.name}_buffer = data;")
-
-                # 连接器: 将数据路由到连接的 R-PORT
-                conn_key = (comp.name, port.name)
-                if conn_key in self._connector_map:
-                    for conn in self._connector_map[conn_key]:
-                        lines.append(f"    /* Connector: {conn.provider_swc}.{conn.provider_port} -> {conn.requester_swc}.{conn.requester_port} */")
-                        lines.append(f"    {conn.requester_port}_buffer = data; /* cross-component routing */")
-
                 lines.append("    return E_OK;")
                 lines.append("}")
                 lines.append("")
 
-        # ─── Read 函数实现 (R-PORT) ───
+        # Read 函数实现
         for port in comp.ports:
             if port.port_kind == "R-PORT" and port.data_type:
                 func_name = f"Rte_Read_{comp.name}_{port.name}_{port.data_element}"
@@ -321,43 +235,7 @@ class CodeGenerator:
                 lines.append("}")
                 lines.append("")
 
-        # ─── 调度器实现 ───
-        timing_runnables = [r for r in comp.runnables if r.min_interval > 0]
-        if timing_runnables:
-            lines.append("/* Scheduler */")
-
-            # 周期计数器
-            for run in timing_runnables:
-                lines.append(f"static uint32 Rte_Counter_{run.name} = 0U;")
-            lines.append("")
-
-            # 就绪检查函数
-            for run in timing_runnables:
-                tick_count = int(run.min_interval * 1000)  # 假设 tick=1ms
-                lines.append(f"Std_ReturnType Rte_IsRunnableReady_{run.name}(void)")
-                lines.append("{")
-                lines.append(f"    Rte_Counter_{run.name}++;")
-                lines.append(f"    if (Rte_Counter_{run.name} >= {tick_count}U) /* period={run.min_interval}s */")
-                lines.append("    {")
-                lines.append(f"        Rte_Counter_{run.name} = 0U;")
-                lines.append("        return E_OK;")
-                lines.append("    }")
-                lines.append("    return E_NOT_OK;")
-                lines.append("}")
-                lines.append("")
-
-            # 任务入口函数
-            lines.append(f"void Rte_Task_{comp.name}(void)")
-            lines.append("{")
-            for run in timing_runnables:
-                lines.append(f"    if (E_OK == Rte_IsRunnableReady_{run.name}())")
-                lines.append("    {")
-                lines.append(f"        {run.name}();")
-                lines.append("    }")
-            lines.append("}")
-            lines.append("")
-
-        # ─── Runnable 实现 ───
+        # Runnable 实现
         for run in comp.runnables:
             comment_parts = [f"Runnable: {run.name}"]
             if run.min_interval > 0:
