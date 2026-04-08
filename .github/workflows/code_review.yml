@@ -33,14 +33,13 @@ jobs:
             exit 1
           fi
 
-          CONTENT=$(jq -n \
-            --arg t "@吴智敏 📦 代码已推送
+          CONTENT=$(jq -n --arg t "@吴智敏 📦 代码已推送
                     仓库: ${REPO}
                     分支: ${BRANCH}
                     作者: ${AUTHOR}
                     提交: ${MSG}
                     变更: ${STAT}" \
-            '{"text": $t}')
+            '{"text": $t}' | jq -c .) 
 
           curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
             -H "Authorization: Bearer $TOKEN" \
