@@ -199,6 +199,24 @@ class ArxmlParser:
     # -- 组合 SWC (连接器) --
 
     def _parse_composition_swc(self, el: ET.Element):
+        # 构建实例名 → 类型名的映射
+        # SW-COMPONENT-PROTOTYPE 的 SHORT-NAME 是实例名 (如 "SpeedSensor_0")
+        # TYPE-TREF 指向组件类型 (如 "/Components/SpeedSensor")
+        instance_to_type: dict[str, str] = {}
+        for proto in el.iter(_tag("SW-COMPONENT-PROTOTYPE")):
+            inst_name = _shortname(proto)
+            type_ref = proto.find(_tag("TYPE-TREF"))
+            if type_ref is not None and type_ref.text:
+                type_name = type_ref.text.strip().split("/")[-1]
+                instance_to_type[inst_name] = type_name
+
+        def _resolve_ref(ref_el) -> str:
+            """提取引用的最后一段，若是实例名则解析为类型名"""
+            if ref_el is not None and ref_el.text:
+                name = ref_el.text.strip().split("/")[-1]
+                return instance_to_type.get(name, name)
+            return ""
+
         for connector in el.iter(_tag("ASSEMBLY-SW-CONNECTOR")):
             cn_name = _shortname(connector)
 
@@ -213,17 +231,12 @@ class ArxmlParser:
             req_comp_ref = req_iref.find(_tag("CONTEXT-COMPONENT-REF"))
             req_port_ref = req_iref.find(_tag("TARGET-R-PORT-REF"))
 
-            def _ref_name(ref_el):
-                if ref_el is not None and ref_el.text:
-                    return ref_el.text.strip().split("/")[-1]
-                return ""
-
             self._connectors.append(Connector(
                 name=cn_name,
-                provider_swc=_ref_name(prov_comp_ref),
-                provider_port=_ref_name(prov_port_ref),
-                requester_swc=_ref_name(req_comp_ref),
-                requester_port=_ref_name(req_port_ref),
+                provider_swc=_resolve_ref(prov_comp_ref),
+                provider_port=_resolve_ref(prov_port_ref),
+                requester_swc=_resolve_ref(req_comp_ref),
+                requester_port=_resolve_ref(req_port_ref),
             ))
 
     # ------------------------------------------------------------------

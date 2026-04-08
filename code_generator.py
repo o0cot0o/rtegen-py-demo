@@ -63,6 +63,15 @@ class CodeGenerator:
             key = (conn.provider_swc, conn.provider_port)
             self._connector_map.setdefault(key, []).append(conn)
 
+    def _find_port_data_type(self, swc_name: str, port_name: str) -> str:
+        """查找指定 SWC 端口的数据类型"""
+        for comp in self.module.components:
+            if comp.name == swc_name:
+                for port in comp.ports:
+                    if port.name == port_name and port.data_type:
+                        return port.data_type
+        return "uint8"  # fallback
+
     def generate(self):
         """生成所有 RTE 文件"""
         print(f"\nGenerating RTE files to: {self.output_dir}")
@@ -282,10 +291,20 @@ class CodeGenerator:
         ]
 
         # ─── 数据缓冲区 ───
+        # 确定哪些 R-PORT 是连接器目标 (需要跨文件可见)
+        conn_target_ports: set[str] = set()
+        for conn in self.module.connectors:
+            if conn.requester_swc == comp.name:
+                conn_target_ports.add(conn.requester_port)
+
         lines.append("/* Data buffers */")
         for port in comp.ports:
             if port.data_type and port.data_element:
-                lines.append(f"static {port.data_type} {port.name}_buffer;")
+                if port.name in conn_target_ports:
+                    # 连接器目标: 非 static，供 provider 文件通过 extern 访问
+                    lines.append(f"{port.data_type} {port.name}_buffer;")
+                else:
+                    lines.append(f"static {port.data_type} {port.name}_buffer;")
         lines.append("")
 
         # ─── Write 函数实现 (P-PORT) ───
@@ -300,8 +319,12 @@ class CodeGenerator:
                 conn_key = (comp.name, port.name)
                 if conn_key in self._connector_map:
                     for conn in self._connector_map[conn_key]:
+                        target_buf = f"{conn.requester_port}_buffer"
+                        # 查找目标端口的数据类型
+                        target_type = self._find_port_data_type(conn.requester_swc, conn.requester_port)
                         lines.append(f"    /* Connector: {conn.provider_swc}.{conn.provider_port} -> {conn.requester_swc}.{conn.requester_port} */")
-                        lines.append(f"    {conn.requester_port}_buffer = data; /* cross-component routing */")
+                        lines.append(f"    extern {target_type} {target_buf};")
+                        lines.append(f"    {target_buf} = data;")
 
                 lines.append("    return E_OK;")
                 lines.append("}")
