@@ -28,16 +28,24 @@ jobs:
             -d "{\"app_id\":\"$FEISHU_APP_ID\",\"app_secret\":\"$FEISHU_APP_SECRET\"}" \
             | jq -r '.tenant_access_token')
 
-          TEXT="@吴智敏 📦 代码已推送
-                仓库: ${REPO}
-                分支: ${BRANCH}
-                作者: ${AUTHOR}
-                提交: ${MSG}
-                变更: ${STAT}"
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "获取 token 失败"
+            exit 1
+          fi
 
-          ESCAPED=$(echo "$TEXT" | jq -Rs .)
+          CONTENT=$(jq -n \
+            --arg t "@吴智敏 📦 代码已推送
+                    仓库: ${REPO}
+                    分支: ${BRANCH}
+                    作者: ${AUTHOR}
+                    提交: ${MSG}
+                    变更: ${STAT}" \
+            '{"text": $t}')
 
           curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
-            -d "{\"receive_id\":\"$FEISHU_CHAT_ID\",\"msg_type\":\"text\",\"content\":{\"text\":$ESCAPED}}"
+            -d "$(jq -n \
+              --arg cid "$FEISHU_CHAT_ID" \
+              --argjson ct "$CONTENT" \
+              '{"receive_id": $cid, "msg_type": "text", "content": $ct}')"
