@@ -151,7 +151,6 @@ class CodeGenerator:
             "typedef signed char    sint8;",
             "typedef signed short   sint16;",
             "typedef signed int     sint32;",
-            "typedef signed long    sint64;",
             "typedef float          float32;",
             "typedef double         float64;",
             "typedef uint8          Std_ReturnType;",
